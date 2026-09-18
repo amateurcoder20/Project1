@@ -1,43 +1,39 @@
 class_name GameLogic
 extends RefCounted
-## Pure 4×4 tic-tac-toe rules. No nodes, safe to unit-test headless.
+## NxN tic-tac-toe with a configurable win length. No nodes.
 
-const SIZE := 4
-const CELLS := 16
 const EMPTY := 0
 const KNIGHT := 1
 const QUEEN := 2
 
-const WIN_LINES := [
-	[0, 1, 2, 3],
-	[4, 5, 6, 7],
-	[8, 9, 10, 11],
-	[12, 13, 14, 15],
-	[0, 4, 8, 12],
-	[1, 5, 9, 13],
-	[2, 6, 10, 14],
-	[3, 7, 11, 15],
-	[0, 5, 10, 15],
-	[3, 6, 9, 12],
-]
+var size: int = 3
+var win_length: int = 3
+var cell_count: int = 9
+var win_lines: Array = []
+## win_lines that include each cell, for fast post-move checks.
+var lines_through: Array = []
 
 var cells: PackedInt32Array
 var current_player: int = KNIGHT
 
 
-func _init() -> void:
+func _init(p_size: int = 3, p_win_length: int = 3) -> void:
+	size = maxi(p_size, 1)
+	win_length = clampi(p_win_length, 1, size)
+	cell_count = size * size
+	_build_win_lines()
 	reset()
 
 
 func reset() -> void:
 	cells = PackedInt32Array()
-	cells.resize(CELLS)
+	cells.resize(cell_count)
 	cells.fill(EMPTY)
 	current_player = KNIGHT
 
 
 func is_legal(index: int) -> bool:
-	return index >= 0 and index < CELLS and cells[index] == EMPTY
+	return index >= 0 and index < cell_count and cells[index] == EMPTY
 
 
 func place(index: int) -> bool:
@@ -79,43 +75,76 @@ func snapshot() -> PackedInt32Array:
 	return cells.duplicate()
 
 
-static func winner_of(board: PackedInt32Array) -> int:
-	for line in WIN_LINES:
+func winner_of(board: PackedInt32Array) -> int:
+	for line in win_lines:
 		var a: int = board[line[0]]
-		if a != EMPTY and a == board[line[1]] and a == board[line[2]] and a == board[line[3]]:
+		if a == EMPTY:
+			continue
+		var ok := true
+		for i in range(1, win_length):
+			if board[line[i]] != a:
+				ok = false
+				break
+		if ok:
 			return a
 	return EMPTY
 
 
-static func winning_line_of(board: PackedInt32Array) -> Array:
-	for line in WIN_LINES:
+func winner_from_move(board: PackedInt32Array, index: int) -> int:
+	var a: int = board[index]
+	if a == EMPTY or index < 0 or index >= cell_count:
+		return EMPTY
+	for line in lines_through[index]:
+		var ok := true
+		for i in win_length:
+			if board[line[i]] != a:
+				ok = false
+				break
+		if ok:
+			return a
+	return EMPTY
+
+
+func winning_line_of(board: PackedInt32Array) -> Array:
+	for line in win_lines:
 		var a: int = board[line[0]]
-		if a != EMPTY and a == board[line[1]] and a == board[line[2]] and a == board[line[3]]:
+		if a == EMPTY:
+			continue
+		var ok := true
+		for i in range(1, win_length):
+			if board[line[i]] != a:
+				ok = false
+				break
+		if ok:
 			return line
 	return []
 
 
-static func is_full_board(board: PackedInt32Array) -> bool:
-	for i in CELLS:
+func is_full_board(board: PackedInt32Array) -> bool:
+	for i in cell_count:
 		if board[i] == EMPTY:
 			return false
 	return true
 
 
-static func legal_moves_of(board: PackedInt32Array) -> Array[int]:
+func legal_moves_of(board: PackedInt32Array) -> Array[int]:
 	var moves: Array[int] = []
-	for i in CELLS:
+	for i in cell_count:
 		if board[i] == EMPTY:
 			moves.append(i)
 	return moves
 
 
-static func empty_count(board: PackedInt32Array) -> int:
+func empty_count(board: PackedInt32Array) -> int:
 	var n := 0
-	for i in CELLS:
+	for i in cell_count:
 		if board[i] == EMPTY:
 			n += 1
 	return n
+
+
+func idx(row: int, col: int) -> int:
+	return row * size + col
 
 
 static func player_name(player: int) -> String:
@@ -126,3 +155,47 @@ static func player_name(player: int) -> String:
 			return "Queens"
 		_:
 			return "None"
+
+
+func _build_win_lines() -> void:
+	win_lines = []
+	lines_through.clear()
+	lines_through.resize(cell_count)
+	for i in cell_count:
+		lines_through[i] = []
+	var n := size
+	var k := win_length
+	# Rows
+	for r in n:
+		for c in range(0, n - k + 1):
+			var line: Array = []
+			for i in k:
+				line.append(idx(r, c + i))
+			_register_line(line)
+	# Columns
+	for c in n:
+		for r in range(0, n - k + 1):
+			var line: Array = []
+			for i in k:
+				line.append(idx(r + i, c))
+			_register_line(line)
+	# Diagonal down-right
+	for r in range(0, n - k + 1):
+		for c in range(0, n - k + 1):
+			var line: Array = []
+			for i in k:
+				line.append(idx(r + i, c + i))
+			_register_line(line)
+	# Diagonal down-left
+	for r in range(0, n - k + 1):
+		for c in range(k - 1, n):
+			var line: Array = []
+			for i in k:
+				line.append(idx(r + i, c - i))
+			_register_line(line)
+
+
+func _register_line(line: Array) -> void:
+	win_lines.append(line)
+	for cell in line:
+		lines_through[int(cell)].append(line)

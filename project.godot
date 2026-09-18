@@ -4,7 +4,7 @@ config_version=5
 [application]
 
 config/name="Knights vs Queens"
-config/description="4×4 tic-tac-toe. Knights versus Queens on a 3D board."
+config/description="Tic-tac-toe with 3×3, 5×5, and 8×8 boards. Knights versus Queens on a 3D board."
 config/version="1.0.0"
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.3", "Mobile")
