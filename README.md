@@ -94,7 +94,7 @@ Suggested identifiers (already set in `export_presets.cfg` and `project.godot`):
 | Version name | `1.0.0` |
 | Version code | `1` |
 | Orientation | Portrait (`screen/orientation=1`) |
-| Min SDK | 24 |
+| Min SDK | Template default for the debug APK; `24` on the Play AAB preset |
 | Renderer | Mobile |
 | Internet permission | Off (offline game) |
 
