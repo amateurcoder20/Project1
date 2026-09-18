@@ -59,22 +59,23 @@ static func add_camera(host: Node3D) -> Camera3D:
 
 
 static func frame_board(cam: Camera3D, board_half: float, piece_height: float, aspect: float = 0.56) -> void:
-	## Fit the board AABB (frame + piece crowns) inside the view with air around
-	## every edge. More overhead, no dutch roll — corners were clipping on phones.
-	var margin := maxf(1.05, piece_height * 0.55)
+	## Fit the framed board in both FOV axes with air around every edge.
+	## More overhead, no dutch roll — corners were clipping on phones.
+	var margin := maxf(0.55, piece_height * 0.28)
 	var half := board_half + margin
-	var top := maxf(piece_height, 0.55)
-	cam.fov = 40.0
+	var top := maxf(piece_height, 0.45)
+	cam.fov = 38.0
 	aspect = clampf(aspect, 0.40, 1.85)
 
-	# Bounding sphere around the board so corners stay inside both FOV axes.
-	var radius := sqrt(half * half * 2.0 + top * top)
 	var vfov := deg_to_rad(cam.fov)
 	var hfov := 2.0 * atan(tan(vfov * 0.5) * aspect)
-	var dist := (radius / tan(minf(vfov, hfov) * 0.5)) * 1.16
+	var dist_h := half / tan(hfov * 0.5)
+	var dist_v := half / tan(vfov * 0.5)
+	# Slight pull-back so the near rank + piece crowns survive the 3D tilt.
+	var dist := maxf(dist_h, dist_v) * 1.10
 
-	# ~76° from horizontal: still 3D, far rank fully visible.
-	var elev := deg_to_rad(76.0)
+	# ~74° from horizontal: still 3D, far rank fully visible.
+	var elev := deg_to_rad(74.0)
 	cam.position = Vector3(0.0, dist * sin(elev), dist * cos(elev))
-	cam.look_at(Vector3(0.0, top * 0.10, 0.0), Vector3.UP)
+	cam.look_at(Vector3(0.0, top * 0.08, 0.0), Vector3.UP)
 	cam.rotation_degrees.z = 0.0
