@@ -25,7 +25,8 @@ func _ready() -> void:
 	_board.configure(true)
 	add_child(_board)
 	_board.build()
-	_board.cell_pressed.connect(_on_cell_pressed)
+	# Picking is handled in `_unhandled_input` so mouse, touch, and
+	# emulate-touch-from-mouse all hit the same raycast path.
 
 	_build_hud()
 	_update_turn_label()
@@ -38,20 +39,49 @@ func _process(_delta: float) -> void:
 	_update_hover()
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if _busy or _logic.is_game_over():
+		return
+	if GameSession.vs_ai and _logic.current_player == GameLogic.QUEEN:
+		return
+	var tap := false
+	var pos := Vector2.ZERO
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			tap = true
+			pos = mb.position
+	elif event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			tap = true
+			pos = st.position
+	if not tap:
+		return
+	var index := _cell_at(pos)
+	if index >= 0 and _logic.is_legal(index):
+		_busy = true
+		get_viewport().set_input_as_handled()
+		await _play_human_move(index)
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		_on_menu()
 
 
-func _on_cell_pressed(index: int) -> void:
-	if _busy or _logic.is_game_over():
-		return
-	if GameSession.vs_ai and _logic.current_player == GameLogic.QUEEN:
-		return
-	if not _logic.is_legal(index):
-		return
-	_busy = true
-	await _play_human_move(index)
+func _cell_at(screen_pos: Vector2) -> int:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return -1
+	var from := cam.project_ray_origin(screen_pos)
+	var to := from + cam.project_ray_normal(screen_pos) * 80.0
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = 1
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty() or not hit.collider.has_meta("cell_index"):
+		return -1
+	return int(hit.collider.get_meta("cell_index"))
 
 
 func _play_human_move(index: int) -> void:
@@ -132,23 +162,10 @@ func _on_menu() -> void:
 
 
 func _update_hover() -> void:
-	var cam := get_viewport().get_camera_3d()
-	if cam == null:
-		return
 	var mouse := get_viewport().get_mouse_position()
-	var from := cam.project_ray_origin(mouse)
-	var to := from + cam.project_ray_normal(mouse) * 80.0
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = 1
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	if hit.is_empty() or not hit.collider.has_meta("cell_index"):
-		_hover_index = -1
-		_board.set_hover(-1)
-		return
-	var index: int = hit.collider.get_meta("cell_index")
-	if _logic.is_legal(index):
-		_hover_index = index
-		_board.set_hover(index)
+	_hover_index = _cell_at(mouse)
+	if _hover_index >= 0 and _logic.is_legal(_hover_index):
+		_board.set_hover(_hover_index)
 	else:
 		_hover_index = -1
 		_board.set_hover(-1)

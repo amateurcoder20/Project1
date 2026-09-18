@@ -57,7 +57,7 @@ func _build_ui() -> void:
 
 	var shade := ColorRect.new()
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.05, 0.02, 0.01, 0.38)
+	shade.color = Color(0.04, 0.02, 0.01, 0.12)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(shade)
 

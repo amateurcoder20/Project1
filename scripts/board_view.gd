@@ -140,10 +140,9 @@ func _build_squares() -> void:
 				body.input_ray_pickable = true
 				var shape := CollisionShape3D.new()
 				var box := BoxShape3D.new()
-				box.size = Vector3(SQUARE * 0.96, 0.22, SQUARE * 0.96)
+				box.size = Vector3(SQUARE * 0.98, 0.55, SQUARE * 0.98)
 				shape.shape = box
 				body.add_child(shape)
-				body.input_event.connect(_on_cell_input.bind(index))
 				add_child(body)
 
 
@@ -155,16 +154,6 @@ func _build_hover() -> void:
 	_hover.material_override = _hover_mat
 	_hover.visible = false
 	add_child(_hover)
-
-
-func _on_cell_input(_camera: Node, event: InputEvent, _pos: Vector3, _normal: Vector3, _shape_idx: int, index: int) -> void:
-	if not _interactive:
-		return
-	if event is InputEventMouseButton:
-		var mb := event as InputEventMouseButton
-		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
-			cell_pressed.emit(index)
-	# Touch is converted to mouse when emulate_mouse_from_touch is on.
 
 
 func _restore_square_colors() -> void:
