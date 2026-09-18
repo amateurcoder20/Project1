@@ -1,0 +1,20 @@
+# Godot 4
+.godot/
+*.translation
+
+# Exports & secrets
+build/
+*.apk
+*.aab
+*.ipa
+*.keystore
+*.jks
+*.p12
+export_credentials.cfg
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.import/

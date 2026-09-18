@@ -1,0 +1,39 @@
+; Knights vs Queens — Godot 4.3+ (tested with 4.7.2)
+config_version=5
+
+[application]
+
+config/name="Knights vs Queens"
+config/description="4×4 tic-tac-toe. Knights versus Queens on a 3D board."
+config/version="1.0.0"
+run/main_scene="res://scenes/main_menu.tscn"
+config/features=PackedStringArray("4.3", "Mobile")
+config/icon="res://icon.svg"
+
+[autoload]
+
+GameSession="*res://scripts/game_session.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/size/window_width_override=450
+window/size/window_height_override=800
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+pointing/emulate_mouse_from_touch=true
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=1
+lights_and_shadows/directional_shadow/size=2048
+environment/defaults/default_clear_color=Color(0.1, 0.06, 0.04, 1)

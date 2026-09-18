@@ -1,0 +1,126 @@
+# Knights vs Queens
+
+4×4 tic-tac-toe for Android. **Knights** (player 1) play against **Queens** (player 2 or a depth-limited minimax AI) on a low-poly 3D wood-and-marble board.
+
+This project is built in **Godot 4** (GDScript, Mobile renderer) so the same 3D scene can be edited on desktop and exported to Google Play as APK or AAB.
+
+> The repo still contains a leftover bootstrap file named `Test File` on `main`. It is unused by the game and can be deleted later; it is left in place so this work does not block on it.
+
+## Requirements
+
+- [Godot 4.3 or newer](https://godotengine.org/download/) (developed against **4.7.2**)
+- Standard (non-.NET) build — scripts are GDScript, not C#
+- For Android export: Android SDK / Build-Tools, a JDK 17+, and Godot’s Android export templates matching your editor version
+
+## How to play
+
+1. Choose **Local 2-Player** (hotseat on one device) or **Vs AI**.
+2. Tap an empty cell to drop a piece. Knights always move first.
+3. Get **four in a row** — horizontal, vertical, or diagonal — to win. A full board with no line is a draw.
+4. In Vs AI, you play Knights; after each Knight, the AI places a Queen.
+5. Use **Restart** or **Play Again** for a new match, **Menu** to return to the title screen. Android back goes Menu, then Quit.
+
+## Open and run in the editor
+
+1. Install Godot 4.3+ and open this folder with **Import** (or drag the folder onto the project manager).
+2. The main scene is `scenes/main_menu.tscn`.
+3. Press **F5** (Run Project). A portrait window (720×1280 logical, scaled) should open.
+4. Click empty squares to place pieces. Mouse clicks emulate taps (`emulate_mouse_from_touch` / `emulate_touch_from_mouse` are on).
+
+Headless rules + AI checks (from this folder):
+
+```bash
+godot --headless --path . -s tests/test_game_logic.gd
+```
+
+## Architecture
+
+| Piece | Role |
+| --- | --- |
+| `scripts/game_logic.gd` | Board, legal moves, 4-in-a-row / draw (no nodes) |
+| `scripts/tic_tac_ai.gd` | Queens AI: immediate win/block, then alpha-beta minimax |
+| `scripts/piece_factory.gd` | Procedural low-poly knight (horse head) and queen (crown) |
+| `scripts/board_view.gd` | Wood table, marble/wood squares, ray-picked cells |
+| `scripts/world_look.gd` | Warm lighting, filmic tonemap, tilted camera |
+| `scripts/main_menu.gd` / `game.gd` | Menu + match loop, HUD, win/draw overlay |
+| `scripts/game_session.gd` | Autoload: `vs_ai` flag between scenes |
+
+The 3D board and pieces are built at runtime from primitive meshes (boxes, cylinders, spheres). No external `.glb` assets are required.
+
+AI depth scales with empty cells (about 5 ply in the opening, full search in the endgame) so it plays non-trivially on a 4×4 / 4-in-a-row game without stalling a phone.
+
+## Android / Play Store export
+
+Suggested identifiers (already set in `export_presets.cfg` and `project.godot`):
+
+| Field | Value |
+| --- | --- |
+| App name | Knights vs Queens |
+| Application id / package | `com.amateurcoder20.project1` |
+| Version name | `1.0.0` |
+| Version code | `1` |
+| Orientation | Portrait (`screen/orientation=1`) |
+| Min SDK | 24 |
+| Renderer | Mobile |
+| Internet permission | Off (offline game) |
+
+Placeholder launcher icons live in `assets/icons/` (192, 512, adaptive 432). Replace them with final art before a store listing. Play Console still needs a 512×512 icon and a 1024×500 feature graphic at upload time.
+
+### One-time machine setup
+
+1. In Godot: **Editor → Editor Settings → Export → Android**
+   - Point **Android SDK Path** at your SDK (the folder that contains `platform-tools`).
+   - Install a **JDK 17** and set **Java SDK Path** if Godot does not find it.
+2. **Project → Install Android Build Template…**  
+   Gradle builds (needed for AAB) unpack into `android/build/` (gitignored).
+3. Download **Export Templates** for your exact Godot version: **Editor → Manage Export Templates**.
+
+### Signing (high level)
+
+- **Local debug APK:** Godot can use the debug keystore from Editor Settings. Fine for sideloading, not for Play.
+- **Play upload:** create a dedicated upload keystore and **never commit it**.
+
+```bash
+keytool -genkey -v -keystore ~/keys/knights-vs-queens-upload.keystore \
+  -alias upload -keyalg RSA -keysize 2048 -validity 10000
+```
+
+In the **Android Play Store AAB** preset, set:
+
+- Release keystore path, user (alias), and password (or leave passwords to the OS keyring / CI secrets)
+- Enable **Signed** (already on)
+
+Google Play App Signing will re-sign the AAB with Google’s app key. Keep the upload keystore backed up; losing it means a Play support request to reset the upload key.
+
+Do not put keystore files, aliases, or passwords in git. `*.keystore` is gitignored.
+
+### Export
+
+- **Sideload / internal testing:** Project → Export → **Android APK** → Export Project  
+  Output: `build/android/KnightsVsQueens.apk` (arm64-v8a).
+- **Play Store:** Export → **Android Play Store AAB** → Export Project  
+  Output: `build/android/KnightsVsQueens.aab`. Upload that AAB in Play Console.
+
+Command line (editor settings and templates must already be configured):
+
+```bash
+godot --headless --path . --export-release "Android APK" build/android/KnightsVsQueens.apk
+godot --headless --path . --export-release "Android Play Store AAB" build/android/KnightsVsQueens.aab
+```
+
+### Play Console checklist (store-side, not in this repo)
+
+- Package `com.amateurcoder20.project1` must be unique on Play; change it in the preset if the id is taken.
+- Target API is whatever Godot’s Android gradle template uses for your editor (leave **Target SDK** blank to use the template default, which tracks Play’s requirement).
+- Content rating, store listing, privacy policy if you later add networking. This MVP has no ads, IAP, analytics, or internet permission.
+- Bump `version/code` by 1 for every Play upload; bump `version/name` when you want a user-visible version.
+
+## Regenerating icons
+
+```bash
+python3 tools/gen_icons.py
+```
+
+## Scope
+
+Polished offline MVP only: local hotseat, vs AI, 3D board, Android export metadata. No online multiplayer, ads, or in-app purchases.
