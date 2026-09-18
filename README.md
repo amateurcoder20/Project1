@@ -20,12 +20,46 @@ This project is built in **Godot 4** (GDScript, Mobile renderer) so the same 3D 
 4. In Vs AI, you play Knights; after each Knight, the AI places a Queen.
 5. Use **Restart** or **Play Again** for a new match, **Menu** to return to the title screen. Android back goes Menu, then Quit.
 
+## Get the APK on your phone (no computer)
+
+This repo builds a **debug sideload APK** in GitHub Actions. It is for testing on a device, **not** for the Play Store (that still needs a release AAB and your upload keystore).
+
+The package id is `com.amateurcoder20.project1`. The artifact is named **KnightsVsQueens-debug** and contains `KnightsVsQueens-debug.apk` (arm64-v8a, debug-signed with the Android debug key — no secrets in the repo).
+
+### 1. Start a build
+
+On your phone’s browser, stay logged in to GitHub as the repo owner (needed if the repo is private):
+
+1. Open [https://github.com/amateurcoder20/Project1/actions](https://github.com/amateurcoder20/Project1/actions)
+2. Tap **Build debug APK**
+3. Tap **Run workflow** → branch **`test1`** → **Run workflow**  
+   If you don’t see **Run workflow** yet, a build also starts automatically on every push to `test1`. Open the latest run from this page instead.
+
+The first run can take **10–20 minutes** (it downloads Godot 4.7.2 export templates). Later runs reuse a cache and are faster.
+
+### 2. Download the APK
+
+1. Wait until the run is green (checkmark).
+2. Open that run and scroll to **Artifacts**.
+3. Tap **KnightsVsQueens-debug** to download. GitHub gives you a **zip**.
+4. In Files / Downloads, unzip it. You should see `KnightsVsQueens-debug.apk`.
+
+Artifacts are kept for **14 days**. Run the workflow again if it expired.
+
+### 3. Install on Android
+
+1. Tap the `.apk`.
+2. If Android blocks it, allow **Install unknown apps** for **Files** or **Chrome** (Settings → Apps → Special app access → Install unknown apps).
+3. Install, then open **Knights vs Queens**.
+
+This debug APK will not pass Play review and should not be uploaded to the Play Console. Use the AAB preset on a machine with your release keystore for store builds.
+
 ## Open and run in the editor
 
 1. Install Godot 4.3+ and open this folder with **Import** (or drag the folder onto the project manager).
 2. The main scene is `scenes/main_menu.tscn`.
 3. Press **F5** (Run Project). A portrait window (720×1280 logical, scaled) should open.
-4. Click empty squares to place pieces. Mouse clicks emulate taps (`emulate_mouse_from_touch` / `emulate_touch_from_mouse` are on).
+4. Click empty squares to place pieces. Touch works on phones; on desktop, left-click a cell.
 
 Headless rules + AI checks (from this folder):
 
@@ -60,7 +94,7 @@ Suggested identifiers (already set in `export_presets.cfg` and `project.godot`):
 | Version name | `1.0.0` |
 | Version code | `1` |
 | Orientation | Portrait (`screen/orientation=1`) |
-| Min SDK | 24 |
+| Min SDK | Template default for the debug APK; `24` on the Play AAB preset |
 | Renderer | Mobile |
 | Internet permission | Off (offline game) |
 
@@ -96,10 +130,10 @@ Do not put keystore files, aliases, or passwords in git. `*.keystore` is gitigno
 
 ### Export
 
-- **Sideload / internal testing:** Project → Export → **Android APK** → Export Project  
-  Output: `build/android/KnightsVsQueens.apk` (arm64-v8a).
+- **Sideload / internal testing:** use the GitHub Actions APK above, or Project → Export → **Android APK** → Export Project (debug).  
+  Output: `build/android/KnightsVsQueens.apk` (arm64-v8a). The APK preset uses Godot’s export templates (Gradle off) so CI can sign a debug APK without an `android/build` tree.
 - **Play Store:** Export → **Android Play Store AAB** → Export Project  
-  Output: `build/android/KnightsVsQueens.aab`. Upload that AAB in Play Console.
+  Output: `build/android/KnightsVsQueens.aab`. This preset still uses a Gradle build. Upload that AAB in Play Console.
 
 Command line (editor settings and templates must already be configured):
 

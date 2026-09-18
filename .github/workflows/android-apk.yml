@@ -1,0 +1,165 @@
+# Builds a debug-signed sideload APK with Godot 4.7.2 (matches this project).
+# Not a Play Store / upload-key build — no secrets or custom keystores.
+name: Build debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test1]
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android-apk:
+    name: Export Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GODOT_VERSION: "4.7.2"
+      GODOT_STATUS: "stable"
+      PRESET_NAME: "Android APK"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ""
+
+      - name: Install Android build-tools (apksigner / zipalign)
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "build-tools;35.0.0" "platforms;android-35"
+
+      - name: Cache Godot editor + Android export templates
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/godot-ci
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_STATUS }}-android-templates
+
+      - name: Download Godot 4.7.2 and Android templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CACHE="${{ runner.temp }}/godot-ci"
+          mkdir -p "$CACHE/bin" "$CACHE/templates"
+          cd "$(mktemp -d)"
+
+          echo "Downloading Godot ${GODOT_VERSION}.${GODOT_STATUS} Linux editor…"
+          gh release download "${GODOT_VERSION}-${GODOT_STATUS}" \
+            --repo godotengine/godot \
+            --pattern "Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64.zip"
+
+          echo "Downloading export templates (needed for android_debug.apk)…"
+          gh release download "${GODOT_VERSION}-${GODOT_STATUS}" \
+            --repo godotengine/godot \
+            --pattern "Godot_v${GODOT_VERSION}-${GODOT_STATUS}_export_templates.tpz"
+
+          unzip -o "Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64.zip" -d "$CACHE/bin"
+          chmod +x "$CACHE/bin"/Godot_v${GODOT_VERSION}-${GODOT_STATUS}_linux.x86_64
+
+          # .tpz is a zip. Keep only Android templates to shrink the cache.
+          unzip -o "Godot_v${GODOT_VERSION}-${GODOT_STATUS}_export_templates.tpz" \
+            "templates/version.txt" \
+            "templates/android_debug.apk" \
+            "templates/android_release.apk"
+          mv templates/version.txt templates/android_*.apk "$CACHE/templates/"
+          ls -lh "$CACHE/bin" "$CACHE/templates"
+
+      - name: Install Godot and templates on the runner
+        run: |
+          set -euo pipefail
+          CACHE="${{ runner.temp }}/godot-ci"
+          GODOT_BIN="$(find "$CACHE/bin" -type f -name 'Godot_v*' | head -n 1)"
+          test -x "$GODOT_BIN"
+          sudo ln -sf "$GODOT_BIN" /usr/local/bin/godot
+          godot --version
+
+          TEMPLATE_DIR="${HOME}/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}"
+          mkdir -p "$TEMPLATE_DIR"
+          cp -a "$CACHE/templates/." "$TEMPLATE_DIR/"
+          echo "Templates in $TEMPLATE_DIR:"
+          ls -lh "$TEMPLATE_DIR"
+          test -f "$TEMPLATE_DIR/android_debug.apk"
+          test -f "$TEMPLATE_DIR/version.txt"
+          # Some editor builds look up 4.x.y.stable.official
+          ln -sfn "$TEMPLATE_DIR" "${HOME}/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_STATUS}.official"
+
+      - name: Create Android debug keystore (default androiddebugkey)
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.android"
+          if [ ! -f "${HOME}/.android/debug.keystore" ]; then
+            keytool -genkeypair -keystore "${HOME}/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Write Godot Android editor settings
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.config/godot"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK"
+          test -n "$JAVA_HOME"
+          cat > /tmp/editor_settings-android.tres <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "${JAVA_HOME}"
+          export/android/android_sdk_path = "${SDK}"
+          export/android/debug_keystore = "${HOME}/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+          # Godot 4.x versioned the settings filename; install every likely name.
+          for name in editor_settings-4.tres editor_settings-4.3.tres editor_settings-4.4.tres \
+                      editor_settings-4.5.tres editor_settings-4.6.tres editor_settings-4.7.tres; do
+            cp /tmp/editor_settings-android.tres "${HOME}/.config/godot/${name}"
+          done
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "ANDROID_HOME=$SDK"
+
+      - name: Import project
+        run: |
+          set -euo pipefail
+          godot --headless --path "${GITHUB_WORKSPACE}" --import
+
+      - name: Export debug APK (preset Android APK)
+        run: |
+          set -euo pipefail
+          mkdir -p build/android
+          OUT="${GITHUB_WORKSPACE}/build/android/KnightsVsQueens-debug.apk"
+          for name in editor_settings-4.tres editor_settings-4.3.tres editor_settings-4.4.tres \
+                      editor_settings-4.5.tres editor_settings-4.6.tres editor_settings-4.7.tres; do
+            cp /tmp/editor_settings-android.tres "${HOME}/.config/godot/${name}"
+          done
+          godot --headless --path "${GITHUB_WORKSPACE}" --verbose \
+            --export-debug "${PRESET_NAME}" "$OUT"
+          test -s "$OUT"
+          ls -lh "$OUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KnightsVsQueens-debug
+          path: build/android/KnightsVsQueens-debug.apk
+          if-no-files-found: error
+          retention-days: 14
