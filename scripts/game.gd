@@ -43,30 +43,27 @@ func _process(_delta: float) -> void:
 	_update_hover()
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if _busy or _logic.is_game_over():
 		return
 	if GameSession.vs_ai and _logic.current_player == GameLogic.QUEEN:
 		return
 	var tap := false
-	var pos := Vector2.ZERO
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		if mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
 			tap = true
-			pos = mb.position
 	elif event is InputEventScreenTouch:
 		var st := event as InputEventScreenTouch
 		if st.pressed:
 			tap = true
-			pos = st.position
 	if not tap:
 		return
-	var index := _cell_at(pos)
+	var index := _cell_at_pointer()
 	if index >= 0 and _logic.is_legal(index):
 		_busy = true
 		get_viewport().set_input_as_handled()
-		await _play_human_move(index)
+		_play_human_move(index)
 
 
 func _notification(what: int) -> void:
@@ -172,21 +169,41 @@ func _hud_insets() -> Vector4:
 	return Vector4(side, top, side, bottom)
 
 
-func _cell_at(screen_pos: Vector2) -> int:
-	if _sv == null or _cam == null:
+func _cell_at_pointer() -> int:
+	## Map the pointer through the SubViewport container (handles canvas stretch)
+	## and intersect the board plane — more reliable than mixed window/viewport coords.
+	if _sv == null or _cam == null or _sv_container == null or _board == null:
 		return -1
-	var rect := _sv_container.get_global_rect()
-	if not rect.has_point(screen_pos) or rect.size.x < 1.0 or rect.size.y < 1.0:
+	var local_mouse := _sv_container.get_local_mouse_position()
+	var csize := _sv_container.size
+	if csize.x < 1.0 or csize.y < 1.0:
 		return -1
-	var local: Vector2 = (screen_pos - rect.position) / rect.size * Vector2(_sv.size)
-	var from := _cam.project_ray_origin(local)
-	var to := from + _cam.project_ray_normal(local) * 200.0
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = 1
-	var hit := _world.get_world_3d().direct_space_state.intersect_ray(q)
-	if hit.is_empty() or not hit.collider.has_meta("cell_index"):
+	if local_mouse.x < 0.0 or local_mouse.y < 0.0 or local_mouse.x > csize.x or local_mouse.y > csize.y:
 		return -1
-	return int(hit.collider.get_meta("cell_index"))
+	var sv_pos := Vector2(
+		local_mouse.x / csize.x * float(_sv.size.x),
+		local_mouse.y / csize.y * float(_sv.size.y)
+	)
+	var origin := _cam.project_ray_origin(sv_pos)
+	var dir := _cam.project_ray_normal(sv_pos)
+	if absf(dir.y) < 0.0001:
+		return -1
+	var t := (BoardView.BOARD_Y - origin.y) / dir.y
+	if t < 0.0:
+		return -1
+	var hit := origin + dir * t
+	var n: int = _logic.size
+	var mid := (float(n) - 1.0) * 0.5
+	var pitch := _cell_pitch()
+	var col := int(round(hit.x / pitch + mid))
+	var row := int(round(hit.z / pitch + mid))
+	if row < 0 or col < 0 or row >= n or col >= n:
+		return -1
+	var cx := (float(col) - mid) * pitch
+	var cz := (float(row) - mid) * pitch
+	if absf(hit.x - cx) > pitch * 0.5 or absf(hit.z - cz) > pitch * 0.5:
+		return -1
+	return row * n + col
 
 
 func _play_human_move(index: int) -> void:
@@ -270,8 +287,7 @@ func _on_menu() -> void:
 
 
 func _update_hover() -> void:
-	var mouse := get_viewport().get_mouse_position()
-	_hover_index = _cell_at(mouse)
+	_hover_index = _cell_at_pointer()
 	if _hover_index >= 0 and _logic.is_legal(_hover_index):
 		_board.set_hover(_hover_index)
 	else:
