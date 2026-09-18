@@ -49,8 +49,8 @@ func _rebuild_preview() -> void:
 	WorldLook.add_lights(self, _board.board_half())
 	var vp := get_viewport().get_visible_rect().size
 	var aspect := 0.56 if vp.y < 1.0 else vp.x / vp.y
-	# Menu is a closer hero shot; still keep the whole board in frame.
-	WorldLook.frame_board(_cam, _board.board_half(), pitch * 1.4, aspect)
+	# Sit the whole preview board in the gap between the chips and Local 2-Player.
+	WorldLook.frame_board(_cam, _board.board_half() * 1.28, pitch * 1.5, aspect)
 
 
 func _place_preview_pieces() -> void:
