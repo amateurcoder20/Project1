@@ -67,3 +67,23 @@ static func make_body(text: String, size: int = 22) -> Label:
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", Color(0.9, 0.84, 0.74))
 	return l
+
+
+static func make_choice_button(text: String) -> Button:
+	var b := make_button(text, Vector2(0, 58))
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.add_theme_font_size_override("font_size", 18)
+	b.toggle_mode = true
+	return b
+
+
+static func apply_choice_selected(b: Button, selected: bool) -> void:
+	b.set_pressed_no_signal(selected)
+	if selected:
+		b.add_theme_stylebox_override("normal", panel_style(Color(0.55, 0.34, 0.14), Color(0.92, 0.74, 0.32)))
+		b.add_theme_stylebox_override("pressed", panel_style(Color(0.55, 0.34, 0.14), Color(0.92, 0.74, 0.32)))
+		b.add_theme_stylebox_override("hover", panel_style(Color(0.60, 0.38, 0.16), Color(0.95, 0.80, 0.40)))
+	else:
+		b.add_theme_stylebox_override("normal", panel_style(wood(), Color(0.62, 0.42, 0.22)))
+		b.add_theme_stylebox_override("pressed", panel_style(Color(0.28, 0.15, 0.08), Color(0.85, 0.65, 0.32)))
+		b.add_theme_stylebox_override("hover", panel_style(Color(0.48, 0.28, 0.14), Color(0.85, 0.65, 0.32)))
