@@ -43,8 +43,8 @@ On your phone’s browser, stay logged in to GitHub as the repo owner (needed if
 
 1. Open [https://github.com/amateurcoder20/Project1/actions](https://github.com/amateurcoder20/Project1/actions)
 2. Tap **Build debug APK**
-3. Tap **Run workflow** → branch **`test1`** → **Run workflow**  
-   If you don’t see **Run workflow** yet, a build also starts automatically on every push to `test1`. Open the latest run from this page instead.
+3. Tap **Run workflow** → branch **`main`** → **Run workflow**  
+   If you don’t see **Run workflow** yet, a build also starts automatically on every push to `main`. Open the latest run from this page instead.
 
 The first run can take **10–20 minutes** (it downloads Godot 4.7.2 export templates). Later runs reuse a cache and are faster.
 
