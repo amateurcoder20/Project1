@@ -5,6 +5,8 @@ extends SceneTree
 const GameLogicScript = preload("res://scripts/game_logic.gd")
 const AIScript = preload("res://scripts/tic_tac_ai.gd")
 const PresetScript = preload("res://scripts/board_preset.gd")
+const CourtsScript = preload("res://scripts/courts_rules.gd")
+const SessionScript = preload("res://scripts/game_session.gd")
 
 var _failed := 0
 
@@ -23,6 +25,16 @@ func _init() -> void:
 	_check("5x5 AI blocks four-threat", _test_ai_blocks_5x5())
 	_check("8x8 AI returns a legal move", _test_ai_opening_8x8())
 	_check("preset win lengths", _test_preset_table())
+	_check("leap is a 2x1 from your piece", _test_leap_shape())
+	_check("leap ignores enemies and occupied landings", _test_leap_filters())
+	_check("command reaches 1 and 2 on a clear line", _test_command_clear())
+	_check("command stops at a blocker and ignores diagonals", _test_command_blocked())
+	_check("marshal spends command to win", _test_ai_command_win())
+	_check("marshal spends command to block", _test_ai_command_block())
+	_check("squire does not spend command", _test_ai_squire_saves_power())
+	_check("bo3 crown ends at two wins", _test_series_bo3())
+	_check("courts leaves 3x3 for 5x5", _test_courts_board_default())
+	_check("rank ladder matches the AI constants", _test_rank_ids())
 	if _failed == 0:
 		print("ALL TESTS PASSED")
 		quit(0)
@@ -185,3 +197,160 @@ func _test_ai_opening_8x8() -> bool:
 
 func _test_preset_table() -> bool:
 	return PresetScript.win_length(3) == 3 and PresetScript.win_length(5) == 4 and PresetScript.win_length(8) == 5
+
+
+func _same_cells(got: Array, expected: Array) -> bool:
+	if got.size() != expected.size():
+		push_error("size %s vs %s (%s vs %s)" % [got.size(), expected.size(), got, expected])
+		return false
+	var marked := {}
+	for c in got:
+		marked[int(c)] = true
+	for c in expected:
+		if not marked.has(int(c)):
+			push_error("missing %s in %s" % [c, got])
+			return false
+	return true
+
+
+func _test_leap_shape() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[12] = GameLogicScript.KNIGHT # center (2, 2)
+	var logic = _play(cells, GameLogicScript.KNIGHT, 5, 4)
+	var got: Array = CourtsScript.leap_cells(logic, GameLogicScript.KNIGHT)
+	return _same_cells(got, [1, 3, 5, 9, 15, 19, 21, 23])
+
+
+func _test_leap_filters() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[0] = GameLogicScript.KNIGHT
+	cells[7] = GameLogicScript.QUEEN # one knight-landing occupied
+	cells[24] = GameLogicScript.QUEEN # enemy must not generate leaps
+	var logic = _play(cells, GameLogicScript.KNIGHT, 5, 4)
+	var got: Array = CourtsScript.leap_cells(logic, GameLogicScript.KNIGHT)
+	# From (0,0): (1,2)=7 occupied, (2,1)=11 empty. Nothing else on the board.
+	if not _same_cells(got, [11]):
+		return false
+	var enemy: Array = CourtsScript.leap_cells(logic, GameLogicScript.QUEEN)
+	return enemy.size() > 0 and not enemy.has(11)
+
+
+func _test_command_clear() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[12] = GameLogicScript.QUEEN
+	var logic = _play(cells, GameLogicScript.QUEEN, 5, 4)
+	var got: Array = CourtsScript.command_cells(logic, GameLogicScript.QUEEN)
+	# Orthogonal distance 1 and 2 from (2,2). No diagonals.
+	return _same_cells(got, [10, 11, 13, 14, 2, 7, 17, 22])
+
+
+func _test_command_blocked() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[0] = GameLogicScript.QUEEN # (0,0)
+	cells[1] = GameLogicScript.KNIGHT # blocks the row
+	var logic = _play(cells, GameLogicScript.QUEEN, 5, 4)
+	var got: Array = CourtsScript.command_cells(logic, GameLogicScript.QUEEN)
+	# Row is blocked, so only down the file: (1,0)=5 and (2,0)=10.
+	if not _same_cells(got, [5, 10]):
+		return false
+	# Distance 3 is off the command, even on a clear file of an 8×8.
+	var wide := []
+	wide.resize(64)
+	wide.fill(0)
+	wide[0] = GameLogicScript.QUEEN
+	var big = _play(wide, GameLogicScript.QUEEN, 8, 5)
+	var far: Array = CourtsScript.command_cells(big, GameLogicScript.QUEEN)
+	return far.has(1) and far.has(2) and far.has(8) and far.has(16) and not far.has(3) and not far.has(24)
+
+
+func _test_ai_command_win() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[0] = GameLogicScript.QUEEN
+	cells[1] = GameLogicScript.QUEEN
+	cells[2] = GameLogicScript.QUEEN
+	cells[5] = GameLogicScript.KNIGHT
+	var logic = _play(cells, GameLogicScript.QUEEN, 5, 4)
+	var targets: Array = CourtsScript.command_cells(logic, GameLogicScript.QUEEN)
+	var ai = AIScript.new()
+	var action: Dictionary = ai.choose_action(logic, AIScript.RANK_MARSHAL, targets)
+	return int(action["index"]) == 3 and bool(action["power"])
+
+
+func _test_ai_command_block() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	# Knights threaten index 23 (4,3). Queen at (2,3)=13 can Command there.
+	cells[20] = GameLogicScript.KNIGHT
+	cells[21] = GameLogicScript.KNIGHT
+	cells[22] = GameLogicScript.KNIGHT
+	cells[13] = GameLogicScript.QUEEN
+	var logic = _play(cells, GameLogicScript.QUEEN, 5, 4)
+	var targets: Array = CourtsScript.command_cells(logic, GameLogicScript.QUEEN)
+	if not targets.has(23):
+		push_error("expected command to reach the block cell, got %s" % targets)
+		return false
+	var ai = AIScript.new()
+	var action: Dictionary = ai.choose_action(logic, AIScript.RANK_REGENT, targets)
+	return int(action["index"]) == 23 and bool(action["power"])
+
+
+func _test_ai_squire_saves_power() -> bool:
+	var cells := []
+	cells.resize(25)
+	cells.fill(0)
+	cells[0] = GameLogicScript.QUEEN
+	cells[1] = GameLogicScript.QUEEN
+	cells[2] = GameLogicScript.QUEEN
+	var logic = _play(cells, GameLogicScript.QUEEN, 5, 4)
+	var targets: Array = CourtsScript.command_cells(logic, GameLogicScript.QUEEN)
+	var ai = AIScript.new()
+	var action: Dictionary = ai.choose_action(logic, AIScript.RANK_SQUIRE, targets)
+	# Still takes the win with a normal drop, and does not spend the power.
+	return int(action["index"]) == 3 and not bool(action["power"])
+
+
+func _test_series_bo3() -> bool:
+	var session = SessionScript.new()
+	session.series_kind = SessionScript.SeriesKind.BO3
+	session.note_winner(GameLogicScript.KNIGHT)
+	if session.series_over() or session.knight_wins != 1:
+		return false
+	session.note_winner(GameLogicScript.EMPTY)
+	if session.knight_wins != 1 or session.queen_wins != 0:
+		return false
+	session.note_winner(GameLogicScript.KNIGHT)
+	if not session.series_over() or session.series_target() != 2:
+		return false
+	session.reset_series()
+	return session.knight_wins == 0 and not session.series_over() and session.score_line().find("0") >= 0
+
+
+func _test_courts_board_default() -> bool:
+	var session = SessionScript.new()
+	session.board_size = 3
+	session.set_mini_game(SessionScript.MiniGame.COURTS)
+	if session.board_size != 5 or not session.is_courts():
+		return false
+	session.set_board_size(3)
+	if session.board_size != 5:
+		return false
+	session.set_mini_game(SessionScript.MiniGame.CLASSIC)
+	session.set_board_size(3)
+	return session.board_size == 3 and not session.is_courts()
+
+
+func _test_rank_ids() -> bool:
+	return AIScript.RANK_SQUIRE == SessionScript.AiRank.SQUIRE \
+		and AIScript.RANK_MARSHAL == SessionScript.AiRank.MARSHAL \
+		and AIScript.RANK_REGENT == SessionScript.AiRank.REGENT

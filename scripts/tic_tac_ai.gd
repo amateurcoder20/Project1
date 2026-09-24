@@ -1,46 +1,65 @@
 class_name TicTacAI
 extends RefCounted
 ## Queens AI. Full search on 3×3; depth-limited + threats on 5×5 / 8×8.
+## Ladder: Squire (easy, depth 1, no block), Marshal (this file's original depth),
+## Regent (one ply deeper where the board allows).
 
 const INF := 1_000_000
 const WIN_SCORE := 50_000
+const RANK_SQUIRE := 0
+const RANK_MARSHAL := 1
+const RANK_REGENT := 2
 
 
-func choose_move(logic: GameLogic) -> int:
+func choose_move(logic: GameLogic, rank: int = RANK_MARSHAL) -> int:
+	return int(choose_action(logic, rank, []).get("index", -1))
+
+
+## power_cells: Command targets the Queen may spend (Marshal+). Empty = no power.
+## Returns {index, power}. Power is spent only to win or to block, never as a quiet move.
+func choose_action(logic: GameLogic, rank: int, power_cells: Array) -> Dictionary:
 	var board: PackedInt32Array = logic.snapshot()
+	var powered: Array[int] = []
+	if rank >= RANK_MARSHAL:
+		for c in power_cells:
+			var idx := int(c)
+			if logic.is_legal(idx):
+				powered.append(idx)
+
+	if not powered.is_empty():
+		var power_win := _first_winning_place(logic, board, powered, GameLogic.QUEEN)
+		if power_win >= 0:
+			return {"index": power_win, "power": true}
+
 	var moves: Array[int] = _candidate_moves(logic, board)
 	if moves.is_empty():
 		moves = logic.legal_moves_of(board)
 	if moves.is_empty():
-		return -1
+		return {"index": -1, "power": false}
 
-	# 1. Take a winning Queen move.
-	for m in moves:
-		board[m] = GameLogic.QUEEN
-		if logic.winner_from_move(board, m) == GameLogic.QUEEN:
-			board[m] = GameLogic.EMPTY
-			return m
-		board[m] = GameLogic.EMPTY
+	var queen_win := _first_winning_place(logic, board, moves, GameLogic.QUEEN)
+	if queen_win >= 0:
+		return {"index": queen_win, "power": false}
 
-	# 2. Block a Knight win.
-	for m in moves:
-		board[m] = GameLogic.KNIGHT
-		var knight_wins := logic.winner_from_move(board, m) == GameLogic.KNIGHT
-		board[m] = GameLogic.EMPTY
-		if knight_wins:
-			return m
-
-	# 3. On larger boards, grab / deny (win_length - 1) open threats before search.
-	if logic.size >= 5:
-		var threat: int = _open_threat_move(logic, board, moves, GameLogic.QUEEN)
-		if threat >= 0:
-			return threat
-		threat = _open_threat_move(logic, board, moves, GameLogic.KNIGHT)
-		if threat >= 0:
-			return threat
+	# Squire takes an immediate win, then plays a shallow heuristic and misses blocks.
+	if rank > RANK_SQUIRE:
+		if not powered.is_empty():
+			var power_block := _first_winning_place(logic, board, powered, GameLogic.KNIGHT)
+			if power_block >= 0:
+				return {"index": power_block, "power": true}
+		var block := _first_winning_place(logic, board, moves, GameLogic.KNIGHT)
+		if block >= 0:
+			return {"index": block, "power": false}
+		if logic.size >= 5:
+			var threat: int = _open_threat_move(logic, board, moves, GameLogic.QUEEN)
+			if threat >= 0:
+				return {"index": threat, "power": false}
+			threat = _open_threat_move(logic, board, moves, GameLogic.KNIGHT)
+			if threat >= 0:
+				return {"index": threat, "power": false}
 
 	var remaining: int = logic.empty_count(board)
-	var depth: int = _search_depth(logic, remaining)
+	var depth: int = _search_depth(logic, remaining, rank)
 	if logic.size >= 8 and moves.size() > 14:
 		moves = _top_heuristic_moves(logic, board, moves, 14)
 
@@ -61,11 +80,35 @@ func choose_move(logic: GameLogic) -> int:
 			best_moves.append(m)
 
 	if best_moves.is_empty():
-		return moves[0]
-	return best_moves[randi() % best_moves.size()]
+		return {"index": moves[0], "power": false}
+	return {"index": best_moves[randi() % best_moves.size()], "power": false}
 
 
-func _search_depth(logic: GameLogic, remaining: int) -> int:
+func _first_winning_place(logic: GameLogic, board: PackedInt32Array, moves: Array, player: int) -> int:
+	for m in moves:
+		var idx := int(m)
+		board[idx] = player
+		var wins := logic.winner_from_move(board, idx) == player
+		board[idx] = GameLogic.EMPTY
+		if wins:
+			return idx
+	return -1
+
+
+func _search_depth(logic: GameLogic, remaining: int, rank: int = RANK_MARSHAL) -> int:
+	var depth := _base_depth(logic, remaining)
+	if rank == RANK_SQUIRE:
+		return mini(1, remaining)
+	if rank == RANK_REGENT:
+		if logic.size <= 3:
+			return remaining
+		if logic.size >= 8:
+			return mini(remaining, maxi(depth, 3))
+		return mini(remaining, depth + 1)
+	return depth
+
+
+func _base_depth(logic: GameLogic, remaining: int) -> int:
 	if logic.size <= 3:
 		return remaining
 	if logic.size <= 5:

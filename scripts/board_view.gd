@@ -17,6 +17,8 @@ var _light_mat: StandardMaterial3D
 var _dark_mat: StandardMaterial3D
 var _win_mat: StandardMaterial3D
 var _hover_mat: StandardMaterial3D
+var _pulse_mat: StandardMaterial3D
+var _pulse_marks: Array[MeshInstance3D] = []
 var _interactive := true
 
 
@@ -34,6 +36,7 @@ func board_half() -> float:
 
 
 func build() -> void:
+	set_process(false)
 	_make_materials()
 	_build_table()
 	_build_frame()
@@ -60,6 +63,40 @@ func clear_pieces() -> void:
 	_restore_square_colors()
 	if _hover:
 		_hover.visible = false
+	set_pulse_cells([])
+
+
+func set_pulse_cells(indices: Array) -> void:
+	for mark in _pulse_marks:
+		if is_instance_valid(mark):
+			mark.queue_free()
+	_pulse_marks.clear()
+	if indices.is_empty() or _pulse_mat == null:
+		set_process(false)
+		return
+	set_process(true)
+	for index in indices:
+		var mi := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		# Opaque tile, tall enough to read from the overhead camera.
+		mesh.size = Vector3(square * 0.78, 0.08, square * 0.78)
+		mi.mesh = mesh
+		mi.material_override = _pulse_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var p := cell_position(int(index))
+		mi.position = Vector3(p.x, BOARD_Y + 0.16, p.z)
+		add_child(mi)
+		_pulse_marks.append(mi)
+
+
+func _process(_delta: float) -> void:
+	if _pulse_mat == null or _pulse_marks.is_empty():
+		return
+	var wave := 0.5 + 0.5 * sin(float(Time.get_ticks_msec()) * 0.008)
+	var lit := 0.45 + 0.55 * wave
+	_pulse_mat.albedo_color = Color(0.15 * lit, 0.75 * lit, lit)
+	_pulse_mat.emission = Color(0.2, 0.85, 1.0)
+	_pulse_mat.emission_energy_multiplier = 0.4 + wave * 1.4
 
 
 func spawn_piece(index: int, player: int) -> Node3D:
@@ -194,6 +231,12 @@ func _make_materials() -> void:
 	_hover_mat.emission_enabled = true
 	_hover_mat.emission = Color(1.0, 0.8, 0.3)
 	_hover_mat.emission_energy_multiplier = 0.4
+	_pulse_mat = StandardMaterial3D.new()
+	_pulse_mat.albedo_color = Color(0.1, 0.65, 0.95)
+	_pulse_mat.emission_enabled = true
+	_pulse_mat.emission = Color(0.2, 0.85, 1.0)
+	_pulse_mat.emission_energy_multiplier = 1.1
+	_pulse_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 
 static func _wood(color: Color, roughness: float) -> StandardMaterial3D:
