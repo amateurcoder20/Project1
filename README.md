@@ -2,13 +2,19 @@
 
 Tic-tac-toe for Android. **Knights** (player 1) play against **Queens** (player 2 or a depth-limited minimax AI) on a low-poly 3D wood-and-marble board.
 
-Choose one of three boards on the main menu, then **Local 2-Player** or **Vs AI** (both modes work on every size):
+Choose **Classic** or **Courts**, a board, a series (Casual, Bo3, or Bo5), then **Local 2-Player** or **Vs AI**. Classic is the default and has no special powers.
 
 | Board | Win |
 | --- | --- |
-| 3×3 | 3 in a row (classic) |
+| 3×3 | 3 in a row (Classic only; Courts starts on 5×5) |
 | 5×5 | 4 in a row |
 | 8×8 | 5 in a row |
+
+**Courts** (5×5 or 8×8 only): each side may, once per game, replace that turn’s drop with a pair. Knights place two pieces a chess knight move apart (2×1). Queens place two pieces on diagonally touching squares — adjacent corners only, not a gap. Both squares must be empty. Arm the pair chip, tap the first square, tap a glowing landing, then confirm. Both squares are previewed before the pair is placed. If the first piece already finishes the line, the turn wins and the second piece is not placed. A normal drop is still any empty square. 3×3 has no pairs. Classic has no pairs.
+
+**Crown War** keeps a Knights–Queens score for the session. Bo3 is first to 2, Bo5 is first to 3. After the game, the final board and winning line stay up. Score, Rematch, Restart, and Menu sit in a bottom sheet.
+
+**Vs AI** rank: **Squire** (easy), **Marshal** (normal), **Regent** (harder search). You pick Knights or Queens; the AI takes the other side. Knights still move first, so a Queen player sees the AI open. Marshal and Regent spend their pair to win, to cover two threats, or to make two threats. Squire does not.
 
 The match view frames the **full** board and pieces in the HUD-safe area (portrait). Earlier 4×4 builds clipped the near/far ranks; the camera is now more overhead, has no dutch tilt, and the 3D world is drawn in a SubViewport inset below the turn bar and above Restart/Menu.
 
@@ -24,12 +30,12 @@ This project is built in **Godot 4** (GDScript, Mobile renderer) so the same 3D 
 
 ## How to play
 
-1. On the title screen, pick **3×3 · win 3**, **5×5 · win 4**, or **8×8 · win 5**.
-2. Choose **Local 2-Player** (hotseat on one device) or **Vs AI**.
-3. Tap an empty cell to drop a piece. Knights always move first.
+1. On the title screen, leave **Classic** selected (or switch to **Courts**). Pick a board, a series, and an AI rank.
+2. Choose **Local 2-Player** (hotseat; a pass-the-phone card appears, and **Skip handoffs** hides later ones) or **Vs AI**.
+3. Tap an empty cell to drop a piece. Knights always move first. In Courts, the pair chip is **Knight pair** or **Queen pair** on that side’s turn. **How to play** on the menu, or **?** during a match, shows a normal place, then each pair.
 4. Complete a straight line of the required length (horizontal, vertical, or diagonal) to win. A full board with no line is a draw.
-5. In Vs AI, you play Knights; after each Knight, the AI places a Queen.
-6. Use **Restart** or **Play Again** for a new match, **Menu** to return to the title screen. Android back goes Menu, then Quit.
+5. In Vs AI, choose **You: Knights** or **You: Queens** before the match. The rank name shows while the AI thinks (Squire / Marshal / Regent).
+6. **Rematch** starts the next game in the series. After a Bo3 or Bo5 is decided, Rematch starts a fresh series. **Restart** replays the current game without touching the score. **Menu** returns to the title. Android back goes Menu, then Quit.
 
 ## Get the APK on your phone (no computer)
 
@@ -84,16 +90,20 @@ godot --headless --path . -s tests/test_game_logic.gd
 | --- | --- |
 | `scripts/board_preset.gd` | The three size/win-length pairs |
 | `scripts/game_logic.gd` | N×N board, legal moves, k-in-a-row / draw (no nodes) |
-| `scripts/tic_tac_ai.gd` | Queens AI: full search on 3×3; threats + depth limits on 5×5 / 8×8 |
+| `scripts/tic_tac_ai.gd` | AI for either faction. Squire / Marshal / Regent map onto search depth. Marshal+ may spend a Courts pair to win, block a fork, or create one |
+| `scripts/courts_rules.gd` | Knight pair (2×1) and adjacent Queen pair. No pairs on 3×3 |
+| `scripts/how_to_play.gd` | Reopenable three-step diagram: normal place, Knight pair, Queen pair |
 | `scripts/piece_factory.gd` | Procedural low-poly knight (horse head) and queen (crown) |
-| `scripts/board_view.gd` | Wood table, marble/wood squares, ray-picked cells (scales with N) |
+| `scripts/board_view.gd` | Wood table, marble/wood squares, hover, pulsing power cells |
 | `scripts/world_look.gd` | Warm lighting + camera framing so the whole board stays on-screen |
-| `scripts/main_menu.gd` / `game.gd` | Preset picker, match loop, HUD-safe SubViewport, win/draw overlay |
-| `scripts/game_session.gd` | Autoload: `vs_ai` and `board_size` between scenes |
+| `scripts/match_juice.gd` | Place squash’s tones and a short win sting (synthesized) |
+| `scripts/main_menu.gd` / `game.gd` | Mode chips, side pick, match loop, pass-the-phone, result sheet |
+| `scripts/game_session.gd` | Autoload: mode, board, series score, AI rank, human side |
+| `scripts/player_prefs.gd` | First-run coach and the one-time Courts tutorial |
 
 The 3D board and pieces are built at runtime from primitive meshes (boxes, cylinders, spheres). No external `.glb` assets are required.
 
-AI is full-strength on 3×3, uses threat detection plus a few ply on 5×5, and neighborhood + shallow search on 8×8 so phones stay responsive.
+Marshal is full-strength on 3×3, uses threat detection plus a few ply on 5×5, and neighborhood + shallow search on 8×8 so phones stay responsive. Squire searches one ply, does not block, and does not spend a pair. Regent adds about one ply on 5×5 and a slightly deeper 8×8 cap. The same ladder plays Knights or Queens.
 
 ## Android / Play Store export
 
@@ -169,4 +179,4 @@ python3 tools/gen_icons.py
 
 ## Scope
 
-Polished offline MVP only: local hotseat, vs AI, 3D board, Android export metadata. No online multiplayer, ads, or in-app purchases.
+Offline play: Classic and Courts, local hotseat, vs AI, Crown War series, 3D board, Android export metadata. No online multiplayer, ads, or in-app purchases. Courts pairs are the adjacent double-place above; there is no Leap, Command, or gapped Queen diagonal.
