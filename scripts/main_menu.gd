@@ -10,14 +10,17 @@ var _preset_buttons: Array[Button] = []
 var _mode_buttons: Array[Button] = []
 var _series_buttons: Array[Button] = []
 var _rank_buttons: Array[Button] = []
+var _side_buttons: Array[Button] = []
 var _coach: Control
 var _coach_body: Label
 var _coach_next: Button
 var _coach_page := 0
+var _tutorial: HowToPlay
 
 const _COACH_PAGES: Array[String] = [
 	"Knights move first. Tap an empty square and connect the line on the board chip to win.",
-	"Classic stays plain. Courts adds one Leap or Command each side. Casual, Bo3, or Bo5 tracks the crown.",
+	"Classic stays plain. In Courts, each side may once place a pair: Knights a knight move apart, Queens on touching diagonal squares.",
+	"Vs AI, you pick Knights or Queens and the AI takes the other side. Casual, Bo3, or Bo5 tracks the crown.",
 ]
 
 
@@ -66,7 +69,7 @@ func _rebuild_preview() -> void:
 	var vp := get_viewport().get_visible_rect().size
 	var aspect := 0.56 if vp.y < 1.0 else vp.x / vp.y
 	# Extra pull-back so the preview sits between the chip stack and the play buttons.
-	WorldLook.frame_board(_cam, _board.board_half() * 1.62, pitch * 1.5, aspect)
+	WorldLook.frame_board(_cam, _board.board_half() * 1.85, pitch * 1.5, aspect)
 
 
 func _place_preview_pieces() -> void:
@@ -107,7 +110,7 @@ func _build_ui() -> void:
 	top.offset_left = 20
 	top.offset_right = -20
 	top.offset_top = 28
-	top.offset_bottom = 470
+	top.offset_bottom = 560
 	top.add_theme_constant_override("separation", 8)
 	root.add_child(top)
 
@@ -139,13 +142,19 @@ func _build_ui() -> void:
 	_add_choice(rank_row, _rank_buttons, "Marshal", _on_rank.bind(GameSession.AiRank.MARSHAL))
 	_add_choice(rank_row, _rank_buttons, "Regent", _on_rank.bind(GameSession.AiRank.REGENT))
 
+	var side_row := _labeled_row("You")
+	top.add_child(side_row)
+	_side_buttons.clear()
+	_add_choice(side_row, _side_buttons, "Knights", _on_side.bind(GameLogic.KNIGHT))
+	_add_choice(side_row, _side_buttons, "Queens", _on_side.bind(GameLogic.QUEEN))
+
 	_refresh_chips()
 
 	var bottom := VBoxContainer.new()
 	bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom.offset_left = 40
 	bottom.offset_right = -40
-	bottom.offset_top = -300
+	bottom.offset_top = -380
 	bottom.offset_bottom = -28
 	bottom.add_theme_constant_override("separation", 12)
 	bottom.alignment = BoxContainer.ALIGNMENT_END
@@ -159,14 +168,20 @@ func _build_ui() -> void:
 	ai_btn.pressed.connect(_start_game.bind(true))
 	bottom.add_child(ai_btn)
 
+	var how_btn := UIKit.make_button("How to play", Vector2(420, 56))
+	how_btn.pressed.connect(_open_tutorial)
+	bottom.add_child(how_btn)
+
 	var quit_btn := UIKit.make_button("Quit", Vector2(420, 64))
 	quit_btn.pressed.connect(func() -> void: get_tree().quit())
 	bottom.add_child(quit_btn)
 
-	var hint := UIKit.make_body("Knights move first. AI rank is Squire, Marshal, or Regent. Courts hides 3×3.", 15)
+	var hint := UIKit.make_body("Knights move first. Vs AI, you pick a side. Courts pairs are 5×5 and 8×8 only.", 15)
 	bottom.add_child(hint)
 
 	_build_coach(root)
+	_tutorial = HowToPlay.new()
+	root.add_child(_tutorial)
 
 
 func _labeled_row(caption: String) -> HBoxContainer:
@@ -223,6 +238,9 @@ func _refresh_chips() -> void:
 	var ranks: Array[int] = [GameSession.AiRank.SQUIRE, GameSession.AiRank.MARSHAL, GameSession.AiRank.REGENT]
 	for i in _rank_buttons.size():
 		UIKit.apply_choice_selected(_rank_buttons[i], ranks[i] == GameSession.ai_rank)
+	if _side_buttons.size() == 2:
+		UIKit.apply_choice_selected(_side_buttons[0], GameSession.human_player == GameLogic.KNIGHT)
+		UIKit.apply_choice_selected(_side_buttons[1], GameSession.human_player == GameLogic.QUEEN)
 
 
 func _on_mode(which: int) -> void:
@@ -248,9 +266,20 @@ func _on_rank(rank: int) -> void:
 	_refresh_chips()
 
 
+func _on_side(player: int) -> void:
+	GameSession.set_human_player(player)
+	_refresh_chips()
+
+
 func _start_game(vs_ai: bool) -> void:
 	GameSession.vs_ai = vs_ai
 	get_tree().change_scene_to_file("res://scenes/game.tscn")
+
+
+func _open_tutorial() -> void:
+	if _tutorial == null:
+		return
+	_tutorial.open_at(0)
 
 
 func _build_coach(root: Control) -> void:
@@ -267,8 +296,8 @@ func _build_coach(root: Control) -> void:
 	panel.set_anchors_preset(Control.PRESET_CENTER)
 	panel.offset_left = -280
 	panel.offset_right = 280
-	panel.offset_top = -180
-	panel.offset_bottom = 180
+	panel.offset_top = -240
+	panel.offset_bottom = 240
 	panel.add_theme_stylebox_override("panel", UIKit.panel_style(Color(0.16, 0.09, 0.05, 0.96), Color(0.85, 0.65, 0.32)))
 	_coach.add_child(panel)
 	var col := VBoxContainer.new()

@@ -12,12 +12,31 @@ var series_kind: int = SeriesKind.CASUAL
 var ai_rank: int = AiRank.MARSHAL
 var knight_wins: int = 0
 var queen_wins: int = 0
+## Who the human plays in Vs AI. The AI takes the other side. Knights still move first.
+var human_player: int = GameLogic.KNIGHT
 ## Local 2P can dismiss the pass-the-phone card for the rest of the session.
 var skip_handoff: bool = false
 
 
 func is_courts() -> bool:
 	return mini_game == MiniGame.COURTS
+
+
+func ai_player() -> int:
+	if human_player == GameLogic.QUEEN:
+		return GameLogic.KNIGHT
+	return GameLogic.QUEEN
+
+
+func set_human_player(player: int) -> void:
+	if player == GameLogic.QUEEN:
+		human_player = GameLogic.QUEEN
+	else:
+		human_player = GameLogic.KNIGHT
+
+
+func powers_in_match() -> bool:
+	return is_courts() and CourtsRules.powers_allowed(board_size, win_length())
 
 
 func win_length() -> int:

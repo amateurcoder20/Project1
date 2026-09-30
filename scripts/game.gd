@@ -1,8 +1,13 @@
 extends Node3D
-## Match scene: Classic drops, optional Courts powers, Crown War score.
+## Match scene: Classic drops, Courts pairs, Crown War score.
 ## 3D board lives in a SubViewport inset for HUD / safe-area so edges never clip.
 
 signal handoff_closed
+
+const _PICK_IDLE := 0
+const _PICK_FIRST := 1
+const _PICK_SECOND := 2
+const _PICK_CONFIRM := 3
 
 var _logic: GameLogic
 var _ai: TicTacAI
@@ -15,21 +20,28 @@ var _sv_margins: MarginContainer
 var _turn_label: Label
 var _score_label: Label
 var _power_btn: Button
-var _overlay: Control
-var _overlay_title: Label
-var _overlay_body: Label
+var _confirm_btn: Button
+var _pair_note: Label
+var _help_btn: Button
+var _result_sheet: PanelContainer
+var _result_title: Label
+var _result_body: Label
 var _handoff: Control
-var _handoff_body: Label
-var _rules_card: Control
+var _hud_root: Control
+var _tutorial: HowToPlay
 var _top_bar: MarginContainer
 var _bottom_bar: HBoxContainer
 var _juice: MatchJuice
 var _busy := false
 var _scored := false
+var _started := false
 var _hover_index := -1
-var _power_armed := false
-var _leap_used := false
-var _command_used := false
+var _pick := _PICK_IDLE
+var _pair_a := -1
+var _pair_b := -1
+var _ghost_key := ""
+var _pair_used: Array[bool] = [false, false, false]
+var _sheet_open := false
 var _ai_thinking := false
 var _think_phase := 0.0
 var _insets := Vector4(28, 188, 28, 176)
@@ -53,9 +65,10 @@ func _ready() -> void:
 	get_tree().root.size_changed.connect(_sync_sv_size)
 	_update_turn_label()
 	_refresh_power_chip()
-	if GameSession.is_courts() and not PlayerPrefs.has_seen_courts_hint():
-		_rules_card.visible = true
-		_busy = true
+	if _powers_in_match() and not PlayerPrefs.has_seen_courts_hint():
+		_open_tutorial()
+	else:
+		_begin_opening_turn()
 
 
 func _process(delta: float) -> void:
@@ -75,7 +88,7 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if _busy or _logic.is_game_over() or _card_open():
 		return
-	if GameSession.vs_ai and _logic.current_player == GameLogic.QUEEN:
+	if not _is_human_turn():
 		return
 	var tap := false
 	if event is InputEventMouseButton:
@@ -91,16 +104,17 @@ func _input(event: InputEvent) -> void:
 	var index := _cell_at_pointer()
 	if index < 0:
 		return
-	var powered := false
-	if _power_armed:
-		if not _is_power_cell(index):
+	if _pick == _PICK_IDLE:
+		if not _logic.is_legal(index):
 			return
-		powered = true
-	elif not _logic.is_legal(index):
+		_busy = true
+		get_viewport().set_input_as_handled()
+		_play_human_cells([index], false)
 		return
-	_busy = true
+	if not _logic.is_legal(index):
+		return
 	get_viewport().set_input_as_handled()
-	_play_human_move(index, powered)
+	_on_pair_tap(index)
 
 
 func _notification(what: int) -> void:
@@ -108,8 +122,20 @@ func _notification(what: int) -> void:
 		_on_menu()
 
 
+func _powers_in_match() -> bool:
+	return GameSession.is_courts() and CourtsRules.powers_allowed(_logic.size, _logic.win_length)
+
+
+func _is_human_turn() -> bool:
+	if _logic == null or _logic.is_game_over():
+		return false
+	if not GameSession.vs_ai:
+		return true
+	return _logic.current_player == GameSession.human_player
+
+
 func _card_open() -> bool:
-	return (_overlay != null and _overlay.visible) or (_handoff != null and _handoff.visible) or (_rules_card != null and _rules_card.visible)
+	return (_handoff != null and _handoff.visible) or (_tutorial != null and _tutorial.visible)
 
 
 func _cell_pitch() -> float:
@@ -196,8 +222,8 @@ func _reframe() -> void:
 
 func _hud_insets() -> Vector4:
 	var vp := get_viewport().get_visible_rect().size
-	var top := 220.0 if GameSession.is_courts() else 176.0
-	var bottom := 168.0
+	var top := 340.0 if _powers_in_match() else 176.0
+	var bottom := 420.0 if _sheet_open else 168.0
 	var side := 28.0
 	var safe := DisplayServer.get_display_safe_area()
 	var win := DisplayServer.window_get_size()
@@ -219,6 +245,9 @@ func _layout_hud_edges() -> void:
 		_bottom_bar.offset_top = -_insets.w
 		_bottom_bar.offset_left = _insets.x
 		_bottom_bar.offset_right = -_insets.z
+	if _result_sheet:
+		_result_sheet.offset_left = _insets.x
+		_result_sheet.offset_right = -_insets.z
 
 
 func _cell_at_pointer() -> int:
@@ -256,20 +285,38 @@ func _cell_at_pointer() -> int:
 	return row * n + col
 
 
-func _play_human_move(index: int, powered: bool) -> void:
-	_board.set_hover(-1)
-	await _place_and_commit(index, powered)
+func _begin_opening_turn() -> void:
+	if _started:
+		return
+	_started = true
+	if GameSession.vs_ai and _logic.current_player == GameSession.ai_player() and not _logic.is_game_over():
+		_busy = true
+		_opening_ai()
+
+
+func _opening_ai() -> void:
+	await _play_ai_turn()
 	if _logic.is_game_over():
-		_show_overlay_for_result()
+		_show_result()
+	_update_turn_label()
+	_refresh_power_chip()
+	_busy = false
+
+
+func _play_human_cells(indices: Array, powered: bool) -> void:
+	_board.set_hover(-1)
+	await _commit_cells(indices, powered)
+	if _logic.is_game_over():
+		_show_result()
 		_busy = false
 		return
 	if not GameSession.vs_ai and not GameSession.skip_handoff:
 		_show_handoff()
 		await handoff_closed
-	if GameSession.vs_ai:
+	if GameSession.vs_ai and _logic.current_player == GameSession.ai_player():
 		await _play_ai_turn()
 		if _logic.is_game_over():
-			_show_overlay_for_result()
+			_show_result()
 			_busy = false
 			return
 	_update_turn_label()
@@ -280,6 +327,7 @@ func _play_human_move(index: int, powered: bool) -> void:
 func _play_ai_turn() -> void:
 	_ai_thinking = true
 	_think_phase = 0.0
+	_clear_pair_preview()
 	_score_label.text = _thinking_blurb()
 	var think := 0.42
 	match GameSession.ai_rank:
@@ -290,33 +338,60 @@ func _play_ai_turn() -> void:
 	if _logic.size >= 8:
 		think += 0.12
 	await get_tree().create_timer(think).timeout
-	var power_cells: Array = []
-	var can_power := GameSession.is_courts() and not _command_used and GameSession.ai_rank >= GameSession.AiRank.MARSHAL
-	if can_power:
-		power_cells = CourtsRules.command_cells(_logic, GameLogic.QUEEN)
-	var action: Dictionary = _ai.choose_action(_logic, GameSession.ai_rank, power_cells)
+	var ai_side := GameSession.ai_player()
+	var allow := _powers_in_match() and not _pair_used[ai_side]
+	var opp_power := _powers_in_match() and not _pair_used[GameSession.human_player]
+	var action: Dictionary = _ai.choose_action(_logic, GameSession.ai_rank, ai_side, allow, opp_power)
 	_ai_thinking = false
-	var ai_move := int(action.get("index", -1))
+	var cells: Array = action.get("cells", [])
 	var powered := bool(action.get("power", false))
-	if ai_move >= 0 and _logic.is_legal(ai_move):
-		if powered and not _is_index_in(ai_move, power_cells):
+	if cells.is_empty():
+		_score_label.text = GameSession.score_line()
+		return
+	if powered:
+		if cells.size() < 2 or not CourtsRules.is_partner(_logic, _logic.cells, int(cells[0]), int(cells[1]), ai_side):
 			powered = false
-		await _place_and_commit(ai_move, powered)
+			cells = [int(cells[0])]
+	await _commit_cells(cells, powered)
 	_score_label.text = GameSession.score_line()
 
 
 func _thinking_blurb() -> String:
+	var side := GameLogic.player_name(GameSession.ai_player())
 	match GameSession.ai_rank:
 		GameSession.AiRank.SQUIRE:
-			return "The Squire glances at the board"
+			return "The Squire's %s glance across the board" % side
 		GameSession.AiRank.REGENT:
-			return "The Regent reads every line"
+			return "The Regent reads every %s line" % side
 		_:
-			return "The Marshal weighs the threats"
+			return "The Marshal weighs the %s threats" % side
 
 
-func _place_and_commit(index: int, powered: bool) -> void:
+func _commit_cells(indices: Array, powered: bool) -> void:
 	var player: int = _logic.current_player
+	_clear_pair_preview()
+	var placed := 0
+	for raw in indices:
+		var index := int(raw)
+		if not _logic.is_legal(index):
+			break
+		await _drop_piece(index, player, powered and placed == 0)
+		_logic.place(index)
+		placed += 1
+		if _logic.winner_from_move(_logic.cells, index) == player:
+			break
+	if powered and placed > 0:
+		_pair_used[player] = true
+	_pick = _PICK_IDLE
+	_pair_a = -1
+	_pair_b = -1
+	if not _logic.is_game_over():
+		_logic.switch_player()
+	_update_turn_label()
+	_refresh_power_chip()
+
+
+func _drop_piece(index: int, player: int, powered: bool) -> void:
 	var piece := _board.spawn_piece(index, player)
 	var dest := _board.cell_position(index)
 	var base_scale := piece.scale
@@ -331,22 +406,10 @@ func _place_and_commit(index: int, powered: bool) -> void:
 	squash.tween_property(piece, "scale", base_scale, 0.14)
 	if _juice:
 		_juice.play_place(powered)
-	_logic.place(index)
-	if powered:
-		if player == GameLogic.KNIGHT:
-			_leap_used = true
-		elif player == GameLogic.QUEEN:
-			_command_used = true
-	_power_armed = false
-	_board.set_pulse_cells([])
-	if not _logic.is_game_over():
-		_logic.switch_player()
-		_update_turn_label()
-		_refresh_power_chip()
 	await squash.finished
 
 
-func _show_overlay_for_result() -> void:
+func _show_result() -> void:
 	var w: int = _logic.winner()
 	if not _scored:
 		_scored = true
@@ -359,21 +422,33 @@ func _show_overlay_for_result() -> void:
 		if _juice:
 			_juice.play_win()
 		if GameSession.series_over():
-			_overlay_title.text = "%s take the crown" % GameLogic.player_name(w)
+			_result_title.text = "%s take the crown" % GameLogic.player_name(w)
 		else:
-			_overlay_title.text = "%s win!" % GameLogic.player_name(w)
-		if GameSession.vs_ai and w == GameLogic.QUEEN:
-			_overlay_body.text = "The %s connected %d.\n%s" % [GameSession.rank_label(), n, score]
+			_result_title.text = "%s win!" % GameLogic.player_name(w)
+		if GameSession.vs_ai and w == GameSession.ai_player():
+			_result_body.text = "The %s connected %d.\n%s" % [GameSession.rank_label(), n, score]
 		else:
-			_overlay_body.text = "%d in a row.\n%s" % [n, score]
-		_turn_label.text = _overlay_title.text
+			_result_body.text = "%d in a row.\n%s" % [n, score]
+		_turn_label.text = _result_title.text
 	else:
-		_overlay_title.text = "Draw"
-		_overlay_body.text = "No line of %d.\n%s" % [n, score]
+		_result_title.text = "Draw"
+		_result_body.text = "No line of %d.\n%s" % [n, score]
 		_turn_label.text = "Draw"
 	_score_label.text = score
 	_refresh_power_chip()
-	_overlay.visible = true
+	_sheet_open = true
+	_result_sheet.visible = true
+	_bottom_bar.visible = false
+	call_deferred("_sync_sv_size")
+
+
+func _hide_result_sheet() -> void:
+	_sheet_open = false
+	if _result_sheet:
+		_result_sheet.visible = false
+	if _bottom_bar:
+		_bottom_bar.visible = true
+	call_deferred("_sync_sv_size")
 
 
 func _bob_win_line(line: Array) -> void:
@@ -395,7 +470,11 @@ func _update_turn_label() -> void:
 	if _logic.is_game_over():
 		return
 	var preset := "%s · %s" % [GameSession.mini_game_label(), BoardPreset.short_label(_logic.size)]
-	if _logic.current_player == GameLogic.KNIGHT:
+	var side := GameLogic.player_name(_logic.current_player)
+	if GameSession.vs_ai:
+		var who := "You" if _logic.current_player == GameSession.human_player else GameSession.rank_label()
+		_turn_label.text = "%s · %s  ·  %s" % [who, side, preset]
+	elif _logic.current_player == GameLogic.KNIGHT:
 		_turn_label.text = "Knights to move  ·  %s" % preset
 	else:
 		_turn_label.text = "Queens to move  ·  %s" % preset
@@ -403,69 +482,179 @@ func _update_turn_label() -> void:
 		_score_label.text = GameSession.score_line()
 
 
-func _power_spent_for(player: int) -> bool:
-	if player == GameLogic.KNIGHT:
-		return _leap_used
-	return _command_used
-
-
-func _current_power_cells() -> Array[int]:
-	if not GameSession.is_courts() or _power_spent_for(_logic.current_player):
-		return []
-	return CourtsRules.cells_for(_logic, _logic.current_player)
-
-
-func _is_power_cell(index: int) -> bool:
-	return _is_index_in(index, _current_power_cells())
-
-
-func _is_index_in(index: int, cells: Array) -> bool:
-	for c in cells:
-		if int(c) == index:
+func _any_pair(player: int) -> bool:
+	for i in _logic.cell_count:
+		if not _logic.is_legal(i):
+			continue
+		if not CourtsRules.partners(_logic, _logic.cells, i, player).is_empty():
 			return true
 	return false
+
+
+func _is_partner_cell(origin: int, index: int) -> bool:
+	return CourtsRules.is_partner(_logic, _logic.cells, origin, index, _logic.current_player)
+
+
+func _first_would_win() -> bool:
+	if _pair_a < 0:
+		return false
+	var board := _logic.snapshot()
+	board[_pair_a] = _logic.current_player
+	return _logic.winner_from_move(board, _pair_a) == _logic.current_player
 
 
 func _refresh_power_chip() -> void:
 	if _power_btn == null:
 		return
-	if not GameSession.is_courts():
+	if not _powers_in_match():
 		_power_btn.visible = false
+		_confirm_btn.visible = false
+		_pair_note.visible = false
+		_clear_pair_preview()
 		return
 	_power_btn.visible = true
 	var player: int = _logic.current_player
 	var label := CourtsRules.chip_label(player)
-	var spent := _power_spent_for(player)
-	if _logic.is_game_over() or spent:
+	var spent := _pair_used[player]
+	var human := _is_human_turn()
+	if _logic.is_game_over() or not human or spent or not _any_pair(player):
+		if _pick != _PICK_IDLE:
+			_pick = _PICK_IDLE
+			_pair_a = -1
+			_pair_b = -1
+			_clear_pair_preview()
 		_power_btn.text = ("%s used" % label) if spent else label
 		_power_btn.disabled = true
-		_power_armed = false
+		_confirm_btn.visible = false
+		_pair_note.visible = false
 		UIKit.apply_choice_selected(_power_btn, false)
-		return
-	var targets := _current_power_cells()
-	_power_btn.disabled = targets.is_empty()
-	if _power_armed and not targets.is_empty():
-		_power_btn.text = "%s · tap a glow" % label
-	else:
-		_power_btn.text = label
-		if targets.is_empty():
-			_power_armed = false
-	UIKit.apply_choice_selected(_power_btn, _power_armed)
-	if _power_armed:
-		_board.set_pulse_cells(targets)
-	else:
 		_board.set_pulse_cells([])
+		return
+	_power_btn.disabled = false
+	if _pick == _PICK_IDLE:
+		_power_btn.text = label
+		_confirm_btn.visible = false
+		_pair_note.visible = false
+		_board.set_pulse_cells([])
+	elif _pick == _PICK_FIRST:
+		_power_btn.text = "Cancel · tap a square"
+		_confirm_btn.visible = false
+		_pair_note.text = "First square of the pair. The landing squares will glow."
+		_pair_note.visible = true
+		_board.set_pulse_cells([])
+	elif _pick == _PICK_SECOND:
+		_power_btn.text = "Cancel · tap the pair"
+		_confirm_btn.visible = false
+		_pair_note.text = "Tap a glowing square. Both pieces show before you place them."
+		_pair_note.visible = true
+		_board.set_pulse_cells(CourtsRules.partners(_logic, _logic.cells, _pair_a, player))
+	else:
+		_power_btn.text = "Cancel"
+		_confirm_btn.visible = true
+		if _first_would_win():
+			_confirm_btn.text = "Place winner"
+			_pair_note.text = "That first square already wins, so the second piece is not placed."
+		else:
+			_confirm_btn.text = "Place both"
+			_pair_note.text = "Both squares are previewed. Place both uses this turn."
+		_pair_note.visible = true
+		_board.set_pulse_cells(CourtsRules.partners(_logic, _logic.cells, _pair_a, player))
+	UIKit.apply_choice_selected(_power_btn, _pick != _PICK_IDLE)
+	_ghost_key = ""
+	_refresh_ghosts(_hover_index)
 
 
 func _on_power_pressed() -> void:
-	if _busy or _logic.is_game_over() or _card_open():
-		return
-	if GameSession.vs_ai and _logic.current_player == GameLogic.QUEEN:
+	if _busy or _logic.is_game_over() or _card_open() or not _is_human_turn():
 		return
 	if _power_btn.disabled:
 		return
-	_power_armed = not _power_armed
+	if _pick == _PICK_IDLE:
+		_pick = _PICK_FIRST
+		_pair_a = -1
+		_pair_b = -1
+	else:
+		_pick = _PICK_IDLE
+		_pair_a = -1
+		_pair_b = -1
+		_clear_pair_preview()
 	_refresh_power_chip()
+	_sync_sv_size()
+
+
+func _on_pair_tap(index: int) -> void:
+	var player: int = _logic.current_player
+	if _pick == _PICK_FIRST:
+		if CourtsRules.partners(_logic, _logic.cells, index, player).is_empty():
+			_pair_note.text = "No landing from that square. Tap another empty one."
+			_pair_note.visible = true
+			return
+		_pair_a = index
+		_pair_b = -1
+		_pick = _PICK_SECOND
+		_refresh_power_chip()
+		return
+	if index == _pair_a:
+		return
+	if not _is_partner_cell(_pair_a, index):
+		if _pick == _PICK_SECOND and not CourtsRules.partners(_logic, _logic.cells, index, player).is_empty():
+			_pair_a = index
+			_pair_b = -1
+			_refresh_power_chip()
+		return
+	_pair_b = index
+	_pick = _PICK_CONFIRM
+	_refresh_power_chip()
+
+
+func _on_confirm_pair() -> void:
+	if _busy or _pick != _PICK_CONFIRM or _pair_a < 0 or _pair_b < 0:
+		return
+	if not _is_partner_cell(_pair_a, _pair_b):
+		return
+	_busy = true
+	var cells: Array[int] = [_pair_a, _pair_b]
+	_pick = _PICK_IDLE
+	_play_human_cells(cells, true)
+
+
+func _clear_pair_preview() -> void:
+	_ghost_key = ""
+	if _board == null:
+		return
+	_board.set_ghosts([], GameLogic.EMPTY)
+	_board.set_preview_cells([])
+	_board.set_pulse_cells([])
+	_board.set_hover(-1)
+
+
+func _preview_cells(hover: int) -> Array[int]:
+	var cells: Array[int] = []
+	if _pair_a < 0 or _pick == _PICK_IDLE or _pick == _PICK_FIRST:
+		return cells
+	cells.append(_pair_a)
+	var second := -1
+	if hover >= 0 and hover != _pair_a and _is_partner_cell(_pair_a, hover):
+		second = hover
+	elif _pick == _PICK_CONFIRM:
+		second = _pair_b
+	if second >= 0:
+		cells.append(second)
+	return cells
+
+
+func _refresh_ghosts(hover: int) -> void:
+	if _board == null or not _powers_in_match():
+		return
+	var cells := _preview_cells(hover)
+	var key := "%d:" % _pick
+	for c in cells:
+		key += "%d," % c
+	if key == _ghost_key:
+		return
+	_ghost_key = key
+	_board.set_ghosts(cells, _logic.current_player)
+	_board.set_preview_cells(cells)
 
 
 func _show_handoff() -> void:
@@ -481,26 +670,41 @@ func _dismiss_handoff(skip_rest: bool) -> void:
 	handoff_closed.emit()
 
 
-func _dismiss_rules() -> void:
+func _open_tutorial() -> void:
+	if _tutorial == null:
+		_tutorial = HowToPlay.new()
+		_tutorial.closed.connect(_on_tutorial_closed)
+		_hud_root.add_child(_tutorial)
+	_tutorial.open_at(0)
+
+
+func _on_tutorial_closed() -> void:
 	PlayerPrefs.mark_courts_hint_seen()
-	_rules_card.visible = false
-	_busy = false
+	if _tutorial:
+		_tutorial.visible = false
+	if not _started and not _logic.is_game_over():
+		_begin_opening_turn()
 
 
 func _restart_board() -> void:
-	_overlay.visible = false
+	_hide_result_sheet()
 	_handoff.visible = false
-	_rules_card.visible = false
+	if _tutorial:
+		_tutorial.visible = false
 	_logic.reset()
 	_board.clear_pieces()
 	_busy = false
 	_scored = false
-	_power_armed = false
-	_leap_used = false
-	_command_used = false
+	_started = false
+	_pick = _PICK_IDLE
+	_pair_a = -1
+	_pair_b = -1
+	_pair_used = [false, false, false]
 	_ai_thinking = false
+	_clear_pair_preview()
 	_update_turn_label()
 	_refresh_power_chip()
+	_begin_opening_turn()
 
 
 func _on_rematch() -> void:
@@ -516,17 +720,17 @@ func _on_menu() -> void:
 
 func _update_hover() -> void:
 	_hover_index = _cell_at_pointer()
-	var legal := false
-	if _hover_index >= 0:
-		if _power_armed:
-			legal = _is_power_cell(_hover_index)
-		else:
-			legal = _logic.is_legal(_hover_index)
-	if legal:
-		_board.set_hover(_hover_index)
+	var show := -1
+	if _hover_index >= 0 and _logic.is_legal(_hover_index):
+		if _pick == _PICK_IDLE or _pick == _PICK_FIRST:
+			show = _hover_index
+		elif _hover_index != _pair_a and _is_partner_cell(_pair_a, _hover_index):
+			show = _hover_index
+	if show >= 0:
+		_board.set_hover(show)
 	else:
-		_hover_index = -1
 		_board.set_hover(-1)
+	_refresh_ghosts(show)
 
 
 func _build_hud() -> void:
@@ -534,10 +738,10 @@ func _build_hud() -> void:
 	layer.layer = 1
 	add_child(layer)
 
-	var root := Control.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	layer.add_child(root)
+	_hud_root = Control.new()
+	_hud_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hud_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(_hud_root)
 
 	_top_bar = MarginContainer.new()
 	_top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
@@ -546,7 +750,7 @@ func _build_hud() -> void:
 	_top_bar.add_theme_constant_override("margin_right", int(_insets.z) + 8)
 	_top_bar.add_theme_constant_override("margin_top", 8)
 	_top_bar.add_theme_constant_override("margin_bottom", 4)
-	root.add_child(_top_bar)
+	_hud_root.add_child(_top_bar)
 
 	var turn_panel := PanelContainer.new()
 	turn_panel.add_theme_stylebox_override("panel", UIKit.panel_style(Color(0.12, 0.07, 0.04, 0.78), Color(0.62, 0.42, 0.22)))
@@ -568,12 +772,26 @@ func _build_hud() -> void:
 	_score_label = UIKit.make_body(GameSession.score_line(), 16)
 	_score_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	meta.add_child(_score_label)
+	_help_btn = UIKit.make_button("?", Vector2(52, 48))
+	_help_btn.add_theme_font_size_override("font_size", 24)
+	_help_btn.pressed.connect(_open_tutorial)
+	meta.add_child(_help_btn)
 
-	_power_btn = UIKit.make_choice_button("Leap")
+	_power_btn = UIKit.make_choice_button("Knight pair")
 	_power_btn.custom_minimum_size = Vector2(0, 48)
-	_power_btn.visible = GameSession.is_courts()
+	_power_btn.visible = _powers_in_match()
 	_power_btn.pressed.connect(_on_power_pressed)
 	turn_col.add_child(_power_btn)
+
+	_pair_note = UIKit.make_body("", 14)
+	_pair_note.visible = false
+	turn_col.add_child(_pair_note)
+
+	_confirm_btn = UIKit.make_button("Place both", Vector2(0, 56))
+	_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_confirm_btn.visible = false
+	_confirm_btn.pressed.connect(_on_confirm_pair)
+	turn_col.add_child(_confirm_btn)
 
 	_bottom_bar = HBoxContainer.new()
 	_bottom_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -583,7 +801,7 @@ func _build_hud() -> void:
 	_bottom_bar.offset_bottom = -10.0
 	_bottom_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	_bottom_bar.add_theme_constant_override("separation", 16)
-	root.add_child(_bottom_bar)
+	_hud_root.add_child(_bottom_bar)
 
 	var restart_btn := UIKit.make_button("Restart", Vector2(240, 60))
 	restart_btn.pressed.connect(_restart_board)
@@ -592,20 +810,9 @@ func _build_hud() -> void:
 	menu_btn.pressed.connect(_on_menu)
 	_bottom_bar.add_child(menu_btn)
 
-	_overlay = _make_dim_card(root)
-	var col := _card_column(_overlay)
-	_overlay_title = UIKit.make_title("Knights win!", 36)
-	col.add_child(_overlay_title)
-	_overlay_body = UIKit.make_body("Three in a row.", 18)
-	col.add_child(_overlay_body)
-	var again := UIKit.make_button("Rematch", Vector2(360, 68))
-	again.pressed.connect(_on_rematch)
-	col.add_child(again)
-	var to_menu := UIKit.make_button("Main Menu", Vector2(360, 56))
-	to_menu.pressed.connect(_on_menu)
-	col.add_child(to_menu)
+	_build_result_sheet()
 
-	_handoff = _make_dim_card(root)
+	_handoff = _make_dim_card(_hud_root)
 	var hand_col := _card_column(_handoff)
 	hand_col.add_child(UIKit.make_title("Pass the phone", 34))
 	_handoff_body = UIKit.make_body("Hand the phone to the Queens, then tap Ready.", 18)
@@ -617,13 +824,47 @@ func _build_hud() -> void:
 	skip.pressed.connect(_dismiss_handoff.bind(true))
 	hand_col.add_child(skip)
 
-	_rules_card = _make_dim_card(root)
-	var rules_col := _card_column(_rules_card)
-	rules_col.add_child(UIKit.make_title("Courts", 34))
-	rules_col.add_child(UIKit.make_body("Once per side: Leap a 2×1 from your piece, or Command up to 2 on a clear row or column.", 18))
-	var got_it := UIKit.make_button("Got it", Vector2(360, 64))
-	got_it.pressed.connect(_dismiss_rules)
-	rules_col.add_child(got_it)
+
+var _handoff_body: Label
+
+
+func _build_result_sheet() -> void:
+	_result_sheet = PanelContainer.new()
+	_result_sheet.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_result_sheet.offset_left = _insets.x
+	_result_sheet.offset_right = -_insets.z
+	_result_sheet.offset_top = -400
+	_result_sheet.offset_bottom = -8
+	_result_sheet.visible = false
+	_result_sheet.mouse_filter = Control.MOUSE_FILTER_STOP
+	_result_sheet.add_theme_stylebox_override("panel", UIKit.panel_style(Color(0.14, 0.08, 0.04, 0.96), Color(0.85, 0.65, 0.32)))
+	_hud_root.add_child(_result_sheet)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 10)
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	_result_sheet.add_child(col)
+
+	_result_title = UIKit.make_title("Knights win!", 32)
+	col.add_child(_result_title)
+	_result_body = UIKit.make_body("Four in a row.", 18)
+	col.add_child(_result_body)
+
+	var again := UIKit.make_button("Rematch", Vector2(0, 64))
+	again.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	again.pressed.connect(_on_rematch)
+	col.add_child(again)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+	col.add_child(row)
+	var restart := UIKit.make_button("Restart", Vector2(220, 56))
+	restart.pressed.connect(_restart_board)
+	row.add_child(restart)
+	var to_menu := UIKit.make_button("Menu", Vector2(220, 56))
+	to_menu.pressed.connect(_on_menu)
+	row.add_child(to_menu)
 
 
 func _mode_pill(text: String) -> PanelContainer:
@@ -653,7 +894,7 @@ func _make_dim_card(root: Control) -> Control:
 	root.add_child(overlay)
 	var dim := ColorRect.new()
 	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	dim.color = Color(0.02, 0.01, 0.0, 0.9)
+	dim.color = Color(0.02, 0.01, 0.0, 0.72)
 	overlay.add_child(dim)
 	return overlay
 

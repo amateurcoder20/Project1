@@ -19,6 +19,9 @@ var _win_mat: StandardMaterial3D
 var _hover_mat: StandardMaterial3D
 var _pulse_mat: StandardMaterial3D
 var _pulse_marks: Array[MeshInstance3D] = []
+var _preview_marks: Array[MeshInstance3D] = []
+var _preview_mat: StandardMaterial3D
+var _ghosts: Array[Node3D] = []
 var _interactive := true
 
 
@@ -64,6 +67,8 @@ func clear_pieces() -> void:
 	if _hover:
 		_hover.visible = false
 	set_pulse_cells([])
+	set_preview_cells([])
+	set_ghosts([], GameLogic.EMPTY)
 
 
 func set_pulse_cells(indices: Array) -> void:
@@ -87,6 +92,65 @@ func set_pulse_cells(indices: Array) -> void:
 		mi.position = Vector3(p.x, BOARD_Y + 0.16, p.z)
 		add_child(mi)
 		_pulse_marks.append(mi)
+
+
+func set_preview_cells(indices: Array) -> void:
+	for mark in _preview_marks:
+		if is_instance_valid(mark):
+			mark.queue_free()
+	_preview_marks.clear()
+	if indices.is_empty() or _preview_mat == null:
+		return
+	for index in indices:
+		var mi := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(square * 0.9, 0.05, square * 0.9)
+		mi.mesh = mesh
+		mi.material_override = _preview_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var p := cell_position(int(index))
+		mi.position = Vector3(p.x, BOARD_Y + 0.1, p.z)
+		add_child(mi)
+		_preview_marks.append(mi)
+
+
+func set_ghosts(indices: Array, player: int) -> void:
+	for ghost in _ghosts:
+		if is_instance_valid(ghost):
+			ghost.queue_free()
+	_ghosts.clear()
+	if player != GameLogic.KNIGHT and player != GameLogic.QUEEN:
+		return
+	for index in indices:
+		var idx := int(index)
+		if idx < 0 or idx >= size * size:
+			continue
+		var piece: Node3D = PieceFactory.make_knight() if player == GameLogic.KNIGHT else PieceFactory.make_queen()
+		if player == GameLogic.KNIGHT:
+			piece.rotation_degrees.y = 180
+		piece.scale = Vector3.ONE * piece_scale
+		_ghostify(piece)
+		piece.position = cell_position(idx)
+		add_child(piece)
+		_ghosts.append(piece)
+
+
+func _ghostify(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		var src := mi.material_override as StandardMaterial3D
+		if src != null:
+			var mat := src.duplicate() as StandardMaterial3D
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			var tint := mat.albedo_color
+			tint.a = 0.45
+			mat.albedo_color = tint
+			mat.emission_enabled = true
+			mat.emission = Color(1.0, 0.84, 0.4)
+			mat.emission_energy_multiplier = 0.35
+			mi.material_override = mat
+	for child in node.get_children():
+		_ghostify(child)
 
 
 func _process(_delta: float) -> void:
@@ -237,6 +301,13 @@ func _make_materials() -> void:
 	_pulse_mat.emission = Color(0.2, 0.85, 1.0)
 	_pulse_mat.emission_energy_multiplier = 1.1
 	_pulse_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_preview_mat = StandardMaterial3D.new()
+	_preview_mat.albedo_color = Color(1.0, 0.78, 0.28, 0.9)
+	_preview_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_preview_mat.emission_enabled = true
+	_preview_mat.emission = Color(1.0, 0.72, 0.18)
+	_preview_mat.emission_energy_multiplier = 0.7
+	_preview_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 
 static func _wood(color: Color, roughness: float) -> StandardMaterial3D:
